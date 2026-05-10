@@ -1,0 +1,28 @@
+---
+source: network/src/data_structures/batch.rs
+expression: batch
+---
+Batch {
+    number_of_samples: 3,
+    input_nodes: 2,
+    output_nodes: 3,
+    split_index: 6,
+    data: [
+        1.0,
+        1.0,
+        2.0,
+        2.0,
+        3.0,
+        3.0,
+        11.0,
+        11.0,
+        11.0,
+        22.0,
+        22.0,
+        22.0,
+        33.0,
+        33.0,
+        33.0,
+    ],
+    training: true,
+}

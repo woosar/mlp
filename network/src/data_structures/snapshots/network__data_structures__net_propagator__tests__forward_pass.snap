@@ -1,0 +1,8 @@
+---
+source: network/src/data_structures/net_propagator.rs
+expression: result
+---
+[
+    7.0,
+    7.0,
+]

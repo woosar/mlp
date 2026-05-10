@@ -1,0 +1,15 @@
+---
+source: network/src/data_structures/batch.rs
+expression: result
+---
+[
+    [
+        2.0,
+        2.0,
+    ],
+    [
+        22.0,
+        22.0,
+        22.0,
+    ],
+]

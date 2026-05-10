@@ -1,0 +1,23 @@
+---
+source: network/src/lib.rs
+expression: data
+---
+Batch {
+    number_of_samples: 5,
+    input_nodes: 1,
+    output_nodes: 1,
+    split_index: 5,
+    data: [
+        0.0,
+        0.75,
+        1.5,
+        2.25,
+        3.0,
+        0.0,
+        0.5625,
+        2.25,
+        5.0625,
+        9.0,
+    ],
+    training: true,
+}

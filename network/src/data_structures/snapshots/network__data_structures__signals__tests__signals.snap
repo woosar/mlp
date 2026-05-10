@@ -1,0 +1,27 @@
+---
+source: network/src/data_structures/signals.rs
+expression: signals
+---
+Signals {
+    appended_layout: [
+        3,
+        4,
+        2,
+    ],
+    indices: [
+        0,
+        3,
+        7,
+    ],
+    activations: [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ],
+}
