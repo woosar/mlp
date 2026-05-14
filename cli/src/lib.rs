@@ -1,29 +1,42 @@
-use data::{BatchMode, OwnedDataset, OwnedEvaluation};
+use data::{BatchMode, OwnedData, OwnedDataset, OwnedEvaluation};
 use network::{Activation, Activations, NeuralNet};
+use std::path::Path;
 
 pub fn single_main() {
-    let layout = vec![1, 16,16, 1];
-    let (inp, out) = (0..100)
-        .map(|elem| {
-            let x = (elem as f32 / 49.5) - 1.0;
-            (x, x * x)
-        })
-        .collect::<(Vec<f32>, Vec<f32>)>();
+    let layout = vec![2, 24, 24, 24, 2];
+    let training = Path::new(r"D:\Apps\Phyton\PythonProject10\data.txt");
+    let evaluation = Path::new(r"D:\Apps\Phyton\PythonProject10\data2.txt");
 
-    let mut dataset = OwnedDataset::new(
-        inp,
-        out,
-        32,
-        layout[0],
-        layout[layout.len() - 1],
+    let mut training_dataset = OwnedDataset::new(
+        OwnedData::from_csv(training, 2, 2),
+        256,
+        layout[0].clone(),
+        layout[layout.len() - 1].clone(),
         BatchMode::Sequential,
     );
 
-    let net = NeuralNet::new(layout, Activations::new(Activation::Sigmoid), None);
+    let net = NeuralNet::new(
+        layout.clone(),
+        Activations::new(Activation::ReLu),
+        None,
+        true,
+    );
 
-    net.train(&mut dataset);
-    let mut evaluable = OwnedEvaluation::from(&dataset);
+    net.train(&mut training_dataset, 10000);
+    let evaluation_dataset = OwnedDataset::new(
+        OwnedData::from_csv(evaluation, 2, 2),
+        32,
+        layout[0],
+        layout[layout.len() - 1],
+        BatchMode::Random,
+    );
+    let mut evaluable_2 = OwnedEvaluation::from(&training_dataset);
+
+    net.evaluate_data(&mut evaluable_2);
+    evaluable_2.save_to_json("training_export.json").unwrap();
+    let mut evaluable = OwnedEvaluation::from(&evaluation_dataset);
+
     net.evaluate_data(&mut evaluable);
 
-    evaluable.save_to_json("hehe.json").unwrap()
+    evaluable.save_to_json("evaluation_export.json").unwrap()
 }

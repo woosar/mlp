@@ -1,12 +1,12 @@
 use crate::assert_dimension_validity;
+use crate::owned_data::OwnedData;
 use network::{Batch, BatchProvider};
 use rand::distr::{Distribution, Uniform};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Debug)]
 pub struct OwnedDataset {
-    input: Vec<f32>,
-    output: Vec<f32>,
+    data: OwnedData,
     input_dim: usize,
     output_dim: usize,
     batch_size: usize,
@@ -18,10 +18,10 @@ pub struct OwnedDataset {
 
 impl OwnedDataset {
     pub fn input(&self) -> &[f32] {
-        &self.input
+        &self.data.input()
     }
     pub fn output(&self) -> &[f32] {
-        &self.output
+        &self.data.output()
     }
 
     pub fn input_dim(&self) -> usize {
@@ -31,22 +31,27 @@ impl OwnedDataset {
         self.output_dim
     }
     pub fn create_inference_batch(&self) -> Batch {
-        let len = self.input.len();
-        let new = [self.input.clone(), vec![0.0; self.output.len()]].concat();
+        let len = self.input().len();
+        let zeros = vec![0.0f32; self.output().len()];
+        let new = [self.input(), &zeros].concat();
         // let new = [self.input.clone(), self.output.clone()].concat();
         Batch::new(len, self.input_dim, self.output_dim, &new, false)
     }
     pub fn new(
-        input: Vec<f32>,
-        output: Vec<f32>,
+        data: OwnedData,
         batch_size: usize,
         input_dim: usize,
         output_dim: usize,
         batch_mode: BatchMode,
     ) -> Self {
-        assert_dimension_validity(output.len(), input.len(), output_dim, input_dim);
+        assert_dimension_validity(
+            data.output().len(),
+            data.input().len(),
+            output_dim,
+            input_dim,
+        );
 
-        let total_observations = input.len() / input_dim;
+        let total_observations = data.input().len() / input_dim;
         let drawn_observations = match batch_mode {
             // for sequential draws, we misuse this as a simple cursor!
             BatchMode::Sequential => vec![0],
@@ -54,8 +59,7 @@ impl OwnedDataset {
         };
         let number_of_full_batches = total_observations / batch_size;
         Self {
-            input,
-            output,
+            data,
             input_dim,
             output_dim,
             batch_size,
@@ -98,8 +102,8 @@ impl OwnedDataset {
             let out_start = obs_idx * self.output_dim;
             let out_end = out_start + self.output_dim;
 
-            data.extend_from_slice(&self.input[in_start..in_end]);
-            data.extend_from_slice(&self.output[out_start..out_end]);
+            data.extend_from_slice(&self.data.input_mut()[in_start..in_end]);
+            data.extend_from_slice(&self.data.output_mut()[out_start..out_end]);
         }
 
         Some(Batch::new(
@@ -127,10 +131,10 @@ impl OwnedDataset {
         let input_end = input_start + next_batch_observation_count * self.input_dim;
         let output_start = cursor * self.batch_size * self.output_dim;
         let output_end = output_start + next_batch_observation_count * self.output_dim;
-
+        let (input, output) = self.data.borrow_mut();
         let data = [
-            &self.input[input_start..input_end],
-            &self.output[output_start..output_end],
+            &input[input_start..input_end],
+            &output[output_start..output_end],
         ]
         .concat();
 
@@ -186,6 +190,7 @@ impl BatchProvider for OwnedDataset {
 
 #[cfg(test)]
 mod tests {
+    use crate::owned_data::OwnedData;
     use crate::owned_dataset::{BatchMode, OwnedDataset};
     use insta::assert_debug_snapshot;
     use network::BatchProvider;
@@ -195,7 +200,7 @@ mod tests {
             .map(|idx| ((idx + 1) as f32, ((idx + 1) * 10) as f32))
             .collect::<(Vec<f32>, Vec<f32>)>();
 
-        OwnedDataset::new(inp, out, 3, 1, 1, BatchMode::Sequential)
+        OwnedDataset::new(OwnedData::new(inp, out), 3, 1, 1, BatchMode::Sequential)
     }
 
     fn generate_mimo_dataset(number_of_observations: usize) -> OwnedDataset {
@@ -209,7 +214,7 @@ mod tests {
             .flatten()
             .collect::<Vec<f32>>();
 
-        OwnedDataset::new(inp, out, 3, 2, 3, BatchMode::Sequential)
+        OwnedDataset::new(OwnedData::new(inp, out), 3, 2, 3, BatchMode::Sequential)
     }
 
     #[test]
@@ -235,3 +240,5 @@ mod tests {
         assert_debug_snapshot!(lala)
     }
 }
+
+

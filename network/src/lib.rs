@@ -13,3 +13,4 @@ pub trait Evaluable {
     fn create_inference_batch(&self) -> Batch;
     fn set_prediction(&mut self, batch: Batch);
 }
+

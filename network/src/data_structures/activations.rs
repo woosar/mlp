@@ -11,6 +11,7 @@ pub struct Activations {
 pub enum Activation {
     ReLu,
     Sigmoid,
+    Identity,
 }
 
 impl Activations {
@@ -24,6 +25,10 @@ impl Activations {
             Activation::Sigmoid => Self {
                 activation: sigmoid_activation,
                 derivative: sigmoid_derivative,
+            },
+            Activation::Identity => Self {
+                activation: |input| input,
+                derivative: |_| 1.0,
             },
         }
     }

@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "display",
-        "width": 800,
-        "height": 600
+        "title": "MLP Classifier",
+        "width": 1600,
+        "height": 900,
+        "center": true,
+        "resizable": false
       }
     ],
     "security": {

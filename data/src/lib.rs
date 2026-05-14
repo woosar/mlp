@@ -1,8 +1,10 @@
 mod owned_dataset;
 mod owned_evaluation;
+mod owned_data;
 
 pub use owned_dataset::{BatchMode, OwnedDataset};
 pub use owned_evaluation::OwnedEvaluation;
+pub use owned_data::OwnedData;
 
 pub fn assert_dimension_validity(
     output_len: usize,

@@ -32,11 +32,9 @@ impl NetPropagator {
 
     pub fn backprop(&mut self, input: &[f32], output: &[f32], local_gradient: &mut Vec<f32>) {
         // forward pass to fill signals
-
         let new_output = self.forward_pass(input);
 
         // generate the first error signal
-        // no gatekeepers needed, as the output layer has identity activation
         let delta_l = output
             .iter()
             .zip(new_output)
@@ -105,10 +103,27 @@ impl NetPropagator {
                 }
 
                 output_buffer[i] = if is_last_layer {
-                    acc // we assume identity activation in the final layer
+                    acc
                 } else {
                     (self.activation.activation)(acc)
                 };
+            }
+            // Inside the transition loop
+            if is_last_layer && self.properties.is_classifier() {
+                let max_val = output_buffer
+                    .iter()
+                    .take(n_target_layer)
+                    .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+
+                let mut sum = 0.0;
+                for i in 0..n_target_layer {
+                    output_buffer[i] = (output_buffer[i] - max_val).exp();
+                    sum += output_buffer[i];
+                }
+
+                for i in 0..n_target_layer {
+                    output_buffer[i] /= sum;
+                }
             }
 
             self.swap_buffer.swap();

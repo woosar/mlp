@@ -8,10 +8,11 @@ pub struct NetProperties {
     number_of_parameters: usize,
     capacity: usize,
     max_layer: usize,
+    is_classifier: bool,
 }
 
 impl NetProperties {
-    pub fn new(layout: Vec<usize>) -> Self {
+    pub fn new(layout: Vec<usize>, is_classifier: bool) -> Self {
         let capacity = layout
             .iter()
             .max()
@@ -35,6 +36,7 @@ impl NetProperties {
             number_of_parameters,
             capacity,
             max_layer,
+            is_classifier,
         }
     }
 
@@ -56,6 +58,10 @@ impl NetProperties {
 
     pub fn layout(&self) -> &[usize] {
         &self.layout
+    }
+
+    pub fn is_classifier(&self) -> bool {
+        self.is_classifier
     }
 }
 

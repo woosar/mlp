@@ -14,7 +14,7 @@ const LEARNING_RATE: f32 = 0.01;
 pub struct NeuralNet {
     activation: Activations,
     properties: Arc<NetProperties>,
-    parameters: RwLock<Arc<[f32]>>,
+    parameters: Arc<RwLock<Arc<[f32]>>>,
     // transformer: Arc<dyn Transformer>,
 }
 
@@ -23,19 +23,20 @@ impl NeuralNet {
         layout: Vec<usize>,
         activation: Activations,
         parameters: Option<Vec<f32>>,
+        is_classifier: bool,
         // transformer: Arc<dyn Transformer>,
     ) -> Self {
-        let parameters = if let Some(lala) = parameters {
-            Arc::<[f32]>::from(lala)
+        let parameters = if let Some(external_parameters) = parameters {
+            Arc::<[f32]>::from(external_parameters)
         } else {
             Self::initialize_randomized_parameters(&layout)
         };
-        let properties = NetProperties::new(layout);
+        let properties = NetProperties::new(layout, is_classifier);
 
         Self {
             activation,
             properties: Arc::new(properties),
-            parameters: RwLock::new(parameters),
+            parameters: Arc::new(RwLock::new(parameters)),
             // transformer,
         }
     }
@@ -45,13 +46,14 @@ impl NeuralNet {
     }
 
     fn update_parameters(&self, gradient: Vec<f32>) {
-        let mut writer = self.parameters.write().unwrap();
-        let new_params_vec: Vec<f32> = writer
+        let current_params = Arc::clone(&*self.parameters.read().unwrap());
+        let new_arc: Arc<[f32]> = current_params
             .iter()
             .zip(gradient.iter())
-            .map(|(w, g)| w - (LEARNING_RATE * g)) // Simplest version
+            .map(|(w, g)| w - (0.01 * g))
             .collect();
-        *writer = Arc::from(new_params_vec);
+        let mut writer = self.parameters.write().unwrap();
+        *writer = new_arc;
     }
 
     pub fn evaluate_data<A: Evaluable>(&self, dataset: &mut A) {
@@ -78,11 +80,15 @@ impl NeuralNet {
         }
     }
 
-    pub fn train<T: BatchProvider>(&self, data: &mut T) {
+    pub fn train<T: BatchProvider>(&self, data: &mut T, epochs: usize) {
         let mut counter = 0;
-        while counter < 40000 {
-            if counter % 10000 == 0 {
-                println!("{counter}")
+        while counter < epochs {
+            // println!("{counter}");
+            if counter % 1000 == 0 {
+                println!(
+                    "epoch: {counter}/{epochs}, {:.2}",
+                    100.0 * (counter as f32) / (epochs as f32)
+                )
             }
 
             data.reset();
@@ -147,5 +153,15 @@ impl NeuralNet {
         }
 
         Arc::from(params)
+    }
+}
+
+impl Clone for NeuralNet {
+    fn clone(&self) -> Self {
+        Self {
+            activation: self.activation.clone(),
+            properties: Arc::clone(&self.properties),
+            parameters: Arc::clone(&self.parameters),
+        }
     }
 }

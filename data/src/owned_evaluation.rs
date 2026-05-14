@@ -53,10 +53,12 @@ impl From<&OwnedDataset> for OwnedEvaluation {
 
 impl Evaluable for OwnedEvaluation {
     fn create_inference_batch(&self) -> Batch {
-        let mut data = vec![0.0; self.input.len() * (self.output_dim + self.input_dim)];
-        data[0..self.input.len() * self.input_dim].copy_from_slice(&self.input);
+        let mut data = vec![0.0; self.input.len() +self.output.len()];
+        println!("{:#?}",data.len());
+
+        data[0..self.input.len()].copy_from_slice(&self.input);
         Batch::new(
-            self.input.len(),
+            self.input.len()/self.input_dim,
             self.input_dim,
             self.output_dim,
             &data,
