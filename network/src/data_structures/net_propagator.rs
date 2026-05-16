@@ -35,6 +35,8 @@ impl NetPropagator {
         let new_output = self.forward_pass(input);
 
         // generate the first error signal
+        // we assume MSE for regression and CE for classification
+        // this yields the same first error signal
         let delta_l = output
             .iter()
             .zip(new_output)
@@ -108,7 +110,7 @@ impl NetPropagator {
                     (self.activation.activation)(acc)
                 };
             }
-            // Inside the transition loop
+            // apply softmax for classifier
             if is_last_layer && self.properties.is_classifier() {
                 let max_val = output_buffer
                     .iter()
@@ -147,7 +149,7 @@ mod tests {
 
     fn create_propagator() -> NetPropagator {
         let layout = vec![2, 3, 2];
-        let props = NetProperties::new(layout);
+        let props = NetProperties::new(layout, false);
         let parameters: Arc<[f32]> = vec![1.0; props.number_of_parameters()].into();
         let propagator = NetPropagator::new(
             Activations::new(Activation::ReLu),

@@ -809,6 +809,8 @@ dependencies = [
 name = "display"
 version = "0.1.0"
 dependencies = [
+ "data",
+ "network",
  "serde",
  "serde_json",
  "tauri",

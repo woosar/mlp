@@ -30,6 +30,15 @@ impl OwnedData {
         Self { input, output }
     }
 
+    pub fn from_input_slice(input: &[f32]) -> Self {
+        let input = Vec::from(input);
+        let len = input.len();
+        Self {
+            input,
+            output: vec![0.0; len],
+        }
+    }
+
     pub fn from_csv(path: &Path, input_dim: usize, output_dim: usize) -> Self {
         let content = std::fs::read_to_string(path).unwrap();
 

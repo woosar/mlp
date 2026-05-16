@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn test_properties() {
         let layout = vec![2, 3, 2];
-        let properties = NetProperties::new(layout);
+        let properties = NetProperties::new(layout, true);
         assert_debug_snapshot!(properties)
     }
 }

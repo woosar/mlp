@@ -79,7 +79,7 @@ impl NeuralNet {
             self.backprop(&batch)
         }
     }
-
+    #[cfg(not(feature = "emission"))]
     pub fn train<T: BatchProvider>(&self, data: &mut T, epochs: usize) {
         let mut counter = 0;
         while counter < epochs {
@@ -93,6 +93,27 @@ impl NeuralNet {
 
             data.reset();
             self.train_on_epoch(data);
+
+            counter += 1;
+        }
+    }
+
+    #[cfg(feature = "emission")]
+    pub fn train<T: BatchProvider>(
+        &self,
+        data: &mut T,
+        epochs: usize,
+        mut on_epoch_end: impl FnMut(usize),
+    ) {
+        let mut counter = 0;
+        while counter < epochs {
+            // println!("{counter}");
+            
+
+            data.reset();
+            self.train_on_epoch(data);
+            on_epoch_end(counter);
+
             counter += 1;
         }
     }
