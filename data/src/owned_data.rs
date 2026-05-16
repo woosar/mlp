@@ -1,5 +1,3 @@
-use std::path::Path;
-
 #[derive(Debug)]
 pub struct OwnedData {
     input: Vec<f32>,
@@ -39,9 +37,7 @@ impl OwnedData {
         }
     }
 
-    pub fn from_csv(path: &Path, input_dim: usize, output_dim: usize) -> Self {
-        let content = std::fs::read_to_string(path).unwrap();
-
+    pub fn from_csv(content: &str, input_dim: usize, output_dim: usize) -> Self {
         let mut input = Vec::new();
         let mut output = Vec::new();
 

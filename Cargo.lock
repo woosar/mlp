@@ -479,10 +479,7 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "data",
- "insta",
  "network",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -811,8 +808,6 @@ version = "0.1.0"
 dependencies = [
  "data",
  "network",
- "serde",
- "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

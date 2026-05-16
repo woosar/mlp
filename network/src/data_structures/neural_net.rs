@@ -15,7 +15,7 @@ pub struct NeuralNet {
     activation: Activations,
     properties: Arc<NetProperties>,
     parameters: Arc<RwLock<Arc<[f32]>>>,
-    // transformer: Arc<dyn Transformer>,
+    loss: Arc<RwLock<f32>>,
 }
 
 impl NeuralNet {
@@ -37,7 +37,7 @@ impl NeuralNet {
             activation,
             properties: Arc::new(properties),
             parameters: Arc::new(RwLock::new(parameters)),
-            // transformer,
+            loss: Arc::new(RwLock::new(0.0)),
         }
     }
 
@@ -54,6 +54,11 @@ impl NeuralNet {
             .collect();
         let mut writer = self.parameters.write().unwrap();
         *writer = new_arc;
+    }
+
+    fn update_loss(&self, loss: f32) {
+        let mut writer = self.loss.write().unwrap();
+        *writer = loss;
     }
 
     pub fn evaluate_data<A: Evaluable>(&self, dataset: &mut A) {
@@ -103,17 +108,14 @@ impl NeuralNet {
         &self,
         data: &mut T,
         epochs: usize,
-        mut on_epoch_end: impl FnMut(usize),
+        mut on_epoch_end: impl FnMut(usize, f32),
     ) {
         let mut counter = 0;
         while counter < epochs {
-            // println!("{counter}");
-            
-
             data.reset();
             self.train_on_epoch(data);
-            on_epoch_end(counter);
-
+            let loss = self.loss.read().unwrap();
+            on_epoch_end(counter, *loss);
             counter += 1;
         }
     }
@@ -124,34 +126,37 @@ impl NeuralNet {
 
         let chunk_size = (batch.number_of_samples() / rayon::current_num_threads()).max(1);
 
-        let mut total_gradient = (0..batch.number_of_samples())
+        let (mut total_gradient, mut total_loss) = (0..batch.number_of_samples())
             .collect::<Vec<usize>>()
             .par_chunks(chunk_size)
             .map(|chunk| {
                 let mut propagator = self.create_propagator(current_params.clone());
                 let mut chunk_gradient = vec![0.0; num_params];
+                let mut chunk_loss = 0.0;
 
                 for &i in chunk {
                     let input = batch.input(i); // transform here observation wise, because everything else assumes too much
                     let target = batch.output_sample(i);
-                    propagator.backprop(input, target, &mut chunk_gradient);
+                    propagator.backprop(input, target, &mut chunk_gradient, &mut chunk_loss);
                 }
 
-                chunk_gradient
+                (chunk_gradient, chunk_loss)
             })
             .reduce(
-                || vec![0.0; num_params],
-                |mut a, b| {
-                    for (i, val) in b.iter().enumerate() {
-                        a[i] += val;
+                || (vec![0.0; num_params], 0.0),
+                |(mut grad_a, mut loss_a), (grad_b, loss_b)| {
+                    for (i, &val) in grad_b.iter().enumerate() {
+                        grad_a[i] += val;
                     }
-                    a
+                    loss_a += loss_b;
+                    (grad_a, loss_a)
                 },
             );
 
         let number = batch.number_of_samples() as f32;
         total_gradient.iter_mut().for_each(|elem| *elem /= number);
         self.update_parameters(total_gradient);
+        self.update_loss(total_loss / (num_params as f32))
     }
 
     fn initialize_randomized_parameters(layout: &[usize]) -> Arc<[f32]> {
@@ -183,6 +188,7 @@ impl Clone for NeuralNet {
             activation: self.activation.clone(),
             properties: Arc::clone(&self.properties),
             parameters: Arc::clone(&self.parameters),
+            loss: Arc::new(RwLock::new(0.0)),
         }
     }
 }

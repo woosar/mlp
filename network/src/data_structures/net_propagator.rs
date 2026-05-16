@@ -30,7 +30,13 @@ impl NetPropagator {
         }
     }
 
-    pub fn backprop(&mut self, input: &[f32], output: &[f32], local_gradient: &mut Vec<f32>) {
+    pub fn backprop(
+        &mut self,
+        input: &[f32],
+        output: &[f32],
+        local_gradient: &mut Vec<f32>,
+        local_loss: &mut f32,
+    ) {
         // forward pass to fill signals
         let new_output = self.forward_pass(input);
 
@@ -42,6 +48,11 @@ impl NetPropagator {
             .zip(new_output)
             .map(|(y, z)| z - y)
             .collect::<Vec<_>>();
+
+        // Regression -> Exact MSE Loss
+        // Classification -> Brier Score (MSE on probabilities)
+        // todo: ce loss later, maybe in the delta_l iterator parallely
+        *local_loss += delta_l.iter().map(|d| d * d).sum::<f32>();
 
         {
             let (input_buffer, _) = self.swap_buffer.get_pair();
@@ -172,7 +183,8 @@ mod tests {
         let input = vec![1.0, 0.0];
         let output = vec![1.0, 0.0];
         let mut asd = vec![0.0; 17];
-        let result = propagator.backprop(&input, &output, &mut asd);
+        let mut x = 0.0;
+        let result = propagator.backprop(&input, &output, &mut asd, &mut x);
 
         assert_debug_snapshot!(asd)
     }

@@ -1,6 +1,5 @@
 use data::{BatchMode, OwnedData, OwnedDataset, OwnedEvaluation, RawData};
 use network::{Activation, Activations, NeuralNet};
-use std::path::Path;
 use std::sync::OnceLock;
 use tauri::Emitter;
 
@@ -13,7 +12,7 @@ fn greet(name: &str) -> String {
 }
 
 fn get_net<'a>() -> &'a NeuralNet {
-    let layout = vec![2, 24, 24, 24, 2]; // todo global layoit
+    let layout = vec![2, 24, 24, 24, 2]; // todo global layout
     &NEURAL.get_or_init(|| {
         NeuralNet::new(
             layout.clone(),
@@ -26,13 +25,12 @@ fn get_net<'a>() -> &'a NeuralNet {
 
 #[tauri::command]
 fn train(app_handle: tauri::AppHandle) {
-    println!("Starting training thread...");
-
-    let net_worker = get_net();
+    println!("Starting training");
 
     std::thread::spawn(move || {
-        // todo
-        let training = Path::new(r"files\data.txt");
+        // todo bake it in better
+        let net_worker = get_net();
+        let training = include_str!("../files/training.txt");
         let layout = vec![2, 24, 24, 24, 2];
 
         let mut training_dataset = OwnedDataset::new(
@@ -43,9 +41,10 @@ fn train(app_handle: tauri::AppHandle) {
             BatchMode::Sequential,
         );
 
-        net_worker.train(&mut training_dataset, 10000, |epoch| {
+        net_worker.train(&mut training_dataset, 20000, |epoch, loss| {
             if epoch % 100 == 0 {
                 let _ = app_handle.emit("epoch-completed", epoch);
+                let _ = app_handle.emit("loss", loss);
             }
         });
 
