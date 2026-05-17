@@ -1,5 +1,5 @@
 use crate::data_structures::activations::Activations;
-use crate::data_structures::batch::Batch;
+use crate::data_structures::batch::{Batch, Inference, Training};
 
 use crate::data_structures::net_propagator::NetPropagator;
 use crate::data_structures::net_properties::NetProperties;
@@ -42,7 +42,11 @@ impl<const N: usize> NeuralNet<N> {
     }
 
     fn create_propagator(&self, current_parameters: Arc<[f32]>) -> NetPropagator<N> {
-        NetPropagator::new(self.activation.clone(), current_parameters, self.properties.clone())
+        NetPropagator::new(
+            self.activation.clone(),
+            current_parameters,
+            self.properties.clone(),
+        )
     }
 
     fn update_parameters(&self, gradient: Vec<f32>) {
@@ -67,7 +71,7 @@ impl<const N: usize> NeuralNet<N> {
         dataset.set_prediction(batch)
     }
 
-    pub fn make_inference_on_batch(&self, batch: &mut Batch) {
+    pub fn make_inference_on_batch(&self, batch: &mut Batch<Inference>) {
         let current_params = self.parameters.read().unwrap().clone();
         let mut propagator = self.create_propagator(current_params.clone());
 
@@ -120,13 +124,13 @@ impl<const N: usize> NeuralNet<N> {
         }
     }
 
-    pub fn backprop(&self, batch: &Batch) {
+    pub fn backprop(&self, batch: &Batch<Training>) {
         let current_params = self.parameters.read().unwrap().clone();
         let num_params = self.properties.number_of_parameters();
 
         let chunk_size = (batch.number_of_samples() / rayon::current_num_threads()).max(1);
 
-        let (mut total_gradient, mut total_loss) = (0..batch.number_of_samples())
+        let (mut total_gradient, total_loss) = (0..batch.number_of_samples())
             .collect::<Vec<usize>>()
             .par_chunks(chunk_size)
             .map(|chunk| {
@@ -160,7 +164,7 @@ impl<const N: usize> NeuralNet<N> {
     }
 
     fn initialize_randomized_parameters(layout: &[usize; N]) -> Arc<[f32]> {
-        let mut rng = rand::rng(); // This is the modern entry point
+        let mut rng = rand::rng();
         let mut params = Vec::new();
 
         for i in 0..layout.len() - 1 {

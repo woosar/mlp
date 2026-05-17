@@ -16,7 +16,7 @@ expression: lala
             20.0,
             30.0,
         ],
-        training: true,
+        _state: PhantomData<network::data_structures::batch::Training>,
     },
     Batch {
         number_of_samples: 3,
@@ -31,7 +31,7 @@ expression: lala
             50.0,
             60.0,
         ],
-        training: true,
+        _state: PhantomData<network::data_structures::batch::Training>,
     },
     Batch {
         number_of_samples: 3,
@@ -46,7 +46,7 @@ expression: lala
             80.0,
             90.0,
         ],
-        training: true,
+        _state: PhantomData<network::data_structures::batch::Training>,
     },
     Batch {
         number_of_samples: 1,
@@ -57,6 +57,6 @@ expression: lala
             10.0,
             100.0,
         ],
-        training: true,
+        _state: PhantomData<network::data_structures::batch::Training>,
     },
 ]

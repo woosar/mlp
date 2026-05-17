@@ -1,5 +1,5 @@
 use crate::{OwnedDataset, assert_dimension_validity, de_interleave};
-use network::{Batch, Evaluable};
+use network::{Batch, Evaluable, Inference};
 use serde::Serialize;
 use std::fs::File;
 use std::io::BufWriter;
@@ -73,20 +73,19 @@ impl From<&OwnedDataset> for OwnedEvaluation {
 }
 
 impl Evaluable for OwnedEvaluation {
-    fn create_inference_batch(&self) -> Batch {
+    fn create_inference_batch(&self) -> Batch<Inference> {
         let mut data = vec![0.0; self.input.len() + self.output.len()];
 
         data[0..self.input.len()].copy_from_slice(&self.input);
-        Batch::new(
+        Batch::<Inference>::new(
             self.input.len() / self.input_dim,
             self.input_dim,
             self.output_dim,
             &data,
-            false,
         )
     }
 
-    fn set_prediction(&mut self, batch: Batch) {
+    fn set_prediction(&mut self, batch: Batch<Inference>) {
         let error = self
             .output
             .iter()

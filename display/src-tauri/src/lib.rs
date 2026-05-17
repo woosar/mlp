@@ -43,8 +43,8 @@ fn train(app_handle: tauri::AppHandle) {
         let data_raw = training_dataset.clone().to_raw_data(); // todo wip
         let _ = app_handle.emit("training-data", data_raw);
 
-        net_worker.train(&mut training_dataset, 20000, |epoch, loss| {
-            if epoch % 100 == 0 {
+        net_worker.train(&mut training_dataset, 10000, |epoch, loss| {
+            if epoch % 10 == 0 {
                 let _ = app_handle.emit("epoch-completed", epoch);
                 let _ = app_handle.emit("loss", loss);
             }
