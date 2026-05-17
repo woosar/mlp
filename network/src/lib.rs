@@ -1,17 +1,17 @@
 mod data_structures;
 mod helpers;
 pub use data_structures::activations::{Activation, Activations};
-pub use data_structures::batch::Batch;
+pub use data_structures::batch::{Batch, Inference, Training};
 pub use data_structures::neural_net::NeuralNet;
 
-pub trait BatchProvider {
-    fn provide_batch(&mut self) -> Option<Batch>;
+pub trait BatchProvider<State = Training> {
+    fn provide_batch(&mut self) -> Option<Batch<State>>;
     fn reset(&mut self);
 }
 
 pub trait Evaluable {
-    fn create_inference_batch(&self) -> Batch;
-    fn set_prediction(&mut self, batch: Batch);
+    fn create_inference_batch(&self) -> Batch<Inference>;
+    fn set_prediction(&mut self, batch: Batch<Inference>);
 }
 
 /// Enables Flush-To-Zero (FTZ) and Denormals-Are-Zero (DAZ) modes on x86_64 CPUs.

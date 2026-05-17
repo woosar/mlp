@@ -4,6 +4,6 @@ export const linear_space = (from: number, to: number, number_of_elements: numbe
 };
 
 export const createFlattenedGrid = () => {
-    const grid = linear_space(-1, 1, 101);
+    const grid = linear_space(-1, 1, 51);
     return grid.flatMap((x) => grid.flatMap((y) => [x, y]));
 };

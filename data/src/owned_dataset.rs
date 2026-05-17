@@ -1,6 +1,6 @@
 use crate::owned_data::OwnedData;
 use crate::{RawData, assert_dimension_validity, de_interleave};
-use network::{Batch, BatchProvider};
+use network::{Batch, BatchProvider, Inference, Training};
 use rand::distr::{Distribution, Uniform};
 use std::fmt::{Debug, Formatter};
 
@@ -42,12 +42,12 @@ impl OwnedDataset {
     pub fn output_dim(&self) -> usize {
         self.output_dim
     }
-    pub fn create_inference_batch(&self) -> Batch {
+    pub fn create_inference_batch(&self) -> Batch<Inference> {
         let len = self.input().len();
         let zeros = vec![0.0f32; self.output().len()];
         let new = [self.input(), &zeros].concat();
         // let new = [self.input.clone(), self.output.clone()].concat();
-        Batch::new(len, self.input_dim, self.output_dim, &new, false)
+        Batch::<Inference>::new(len, self.input_dim, self.output_dim, &new)
     }
     pub fn new(
         data: OwnedData,
@@ -82,7 +82,7 @@ impl OwnedDataset {
         }
     }
 
-    pub fn next_random_batch(&mut self) -> Option<Batch> {
+    pub fn next_random_batch(&mut self) -> Option<Batch<Training>> {
         if self.drawn_observations.is_empty() {
             return None;
         }
@@ -118,15 +118,14 @@ impl OwnedDataset {
             data.extend_from_slice(&self.data.output_mut()[out_start..out_end]);
         }
 
-        Some(Batch::new(
+        Some(Batch::<Training>::new(
             count,
             self.input_dim,
             self.output_dim,
             &data,
-            true,
         ))
     }
-    pub fn next_sequential_batch(&mut self) -> Option<Batch> {
+    pub fn next_sequential_batch(&mut self) -> Option<Batch<Training>> {
         // in sequential mode, we use the observation index vector as a simple cursor
         let cursor = self.drawn_observations[0];
 
@@ -152,12 +151,11 @@ impl OwnedDataset {
 
         self.drawn_observations[0] += 1;
 
-        Some(Batch::new(
+        Some(Batch::<Training>::new(
             next_batch_observation_count,
             self.input_dim,
             self.output_dim,
             &data,
-            true,
         ))
     }
 }
@@ -183,8 +181,8 @@ impl Debug for BatchMode {
     }
 }
 
-impl BatchProvider for OwnedDataset {
-    fn provide_batch(&mut self) -> Option<Batch> {
+impl BatchProvider<Training> for OwnedDataset {
+    fn provide_batch(&mut self) -> Option<Batch<Training>> {
         match self.batch_mode {
             BatchMode::Sequential => self.next_sequential_batch(),
             BatchMode::Random => self.next_random_batch(),
