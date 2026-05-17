@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OwnedData {
     input: Vec<f32>,
     output: Vec<f32>,

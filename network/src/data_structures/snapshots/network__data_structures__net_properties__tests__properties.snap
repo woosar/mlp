@@ -19,4 +19,5 @@ NetProperties {
     number_of_parameters: 17,
     capacity: 4,
     max_layer: 2,
+    is_classifier: true,
 }

@@ -11,16 +11,16 @@ use std::sync::{Arc, RwLock};
 const LEARNING_RATE: f32 = 0.01;
 
 #[derive(Debug)]
-pub struct NeuralNet {
+pub struct NeuralNet<const N: usize> {
     activation: Activations,
-    properties: Arc<NetProperties>,
+    properties: Arc<NetProperties<N>>,
     parameters: Arc<RwLock<Arc<[f32]>>>,
     loss: Arc<RwLock<f32>>,
 }
 
-impl NeuralNet {
+impl<const N: usize> NeuralNet<N> {
     pub fn new(
-        layout: Vec<usize>,
+        layout: [usize; N],
         activation: Activations,
         parameters: Option<Vec<f32>>,
         is_classifier: bool,
@@ -41,8 +41,8 @@ impl NeuralNet {
         }
     }
 
-    fn create_propagator(&self, current_parameters: Arc<[f32]>) -> NetPropagator {
-        NetPropagator::new(self.activation, current_parameters, self.properties.clone())
+    fn create_propagator(&self, current_parameters: Arc<[f32]>) -> NetPropagator<N> {
+        NetPropagator::new(self.activation.clone(), current_parameters, self.properties.clone())
     }
 
     fn update_parameters(&self, gradient: Vec<f32>) {
@@ -159,7 +159,7 @@ impl NeuralNet {
         self.update_loss(total_loss / (num_params as f32))
     }
 
-    fn initialize_randomized_parameters(layout: &[usize]) -> Arc<[f32]> {
+    fn initialize_randomized_parameters(layout: &[usize; N]) -> Arc<[f32]> {
         let mut rng = rand::rng(); // This is the modern entry point
         let mut params = Vec::new();
 
@@ -182,7 +182,7 @@ impl NeuralNet {
     }
 }
 
-impl Clone for NeuralNet {
+impl<const N: usize> Clone for NeuralNet<N> {
     fn clone(&self) -> Self {
         Self {
             activation: self.activation.clone(),
