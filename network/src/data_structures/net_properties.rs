@@ -1,8 +1,8 @@
 use crate::helpers::cumulative_sum;
 
 #[derive(Debug, Clone)]
-pub struct NetProperties {
-    layout: Vec<usize>,
+pub struct NetProperties<const N: usize> {
+    layout: [usize; N],
     transition_parameter_count: Vec<usize>,
     transition_offsets: Vec<usize>,
     number_of_parameters: usize,
@@ -11,8 +11,8 @@ pub struct NetProperties {
     is_classifier: bool,
 }
 
-impl NetProperties {
-    pub fn new(layout: Vec<usize>, is_classifier: bool) -> Self {
+impl<const N: usize> NetProperties<N> {
+    pub fn new(layout: [usize; N], is_classifier: bool) -> Self {
         let capacity = layout
             .iter()
             .max()
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_properties() {
-        let layout = vec![2, 3, 2];
+        let layout = [2, 3, 2];
         let properties = NetProperties::new(layout, true);
         assert_debug_snapshot!(properties)
     }

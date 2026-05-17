@@ -5,19 +5,19 @@ use crate::data_structures::swap_buffer::SwapBuffer;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct NetPropagator {
+pub struct NetPropagator<const N: usize> {
     swap_buffer: SwapBuffer,
     signals: Signals,
     activation: Activations,
     parameters: Arc<[f32]>,
-    properties: Arc<NetProperties>,
+    properties: Arc<NetProperties<N>>,
 }
 
-impl NetPropagator {
+impl<const N: usize> NetPropagator<N> {
     pub fn new(
         activation: Activations,
         parameters: Arc<[f32]>,
-        properties: Arc<NetProperties>,
+        properties: Arc<NetProperties<N>>,
     ) -> Self {
         let swap_buffer = SwapBuffer::new(properties.capacity());
         let signals = Signals::new(properties.layout());
@@ -158,8 +158,8 @@ mod tests {
     use insta::assert_debug_snapshot;
     use std::sync::Arc;
 
-    fn create_propagator() -> NetPropagator {
-        let layout = vec![2, 3, 2];
+    fn create_propagator() -> NetPropagator<3> {
+        let layout = [2, 3, 2];
         let props = NetProperties::new(layout, false);
         let parameters: Arc<[f32]> = vec![1.0; props.number_of_parameters()].into();
         let propagator = NetPropagator::new(

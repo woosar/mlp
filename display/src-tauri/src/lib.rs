@@ -3,7 +3,7 @@ use network::{Activation, Activations, NeuralNet};
 use std::sync::OnceLock;
 use tauri::Emitter;
 
-static NEURAL: OnceLock<NeuralNet> = OnceLock::new();
+static NEURAL: OnceLock<NeuralNet<5>> = OnceLock::new();
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -11,11 +11,11 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-fn get_net<'a>() -> &'a NeuralNet {
-    let layout = vec![2, 24, 24, 24, 2]; // todo global layout
+fn get_net<'a>() -> &'a NeuralNet<5> {
+    let layout = [2, 24, 24, 24, 2]; // todo global layout
     &NEURAL.get_or_init(|| {
         NeuralNet::new(
-            layout.clone(),
+            layout,
             Activations::new(Activation::ReLu),
             None,
             true,
@@ -31,13 +31,13 @@ fn train(app_handle: tauri::AppHandle) {
         // todo bake it in better
         let net_worker = get_net();
         let training = include_str!("../files/training.txt");
-        let layout = vec![2, 24, 24, 24, 2];
+        let layout = [2, 24, 24, 24, 2];
 
         let mut training_dataset = OwnedDataset::new(
             OwnedData::from_csv(training, 2, 2),
             256,
-            layout[0].clone(),
-            layout[layout.len() - 1].clone(),
+            layout[0],
+            layout[layout.len() - 1],
             BatchMode::Sequential,
         );
         let data_raw = training_dataset.clone().to_raw_data(); // todo wip
@@ -55,7 +55,7 @@ fn train(app_handle: tauri::AppHandle) {
 }
 #[tauri::command]
 fn calculate(input: Vec<f32>) -> RawData {
-    let layout = vec![2, 24, 24, 24, 2];
+    let layout = [2, 24, 24, 24, 2];
     let data = OwnedData::from_input_slice(&input); // todo: redo ownership here
     let net = get_net();
 

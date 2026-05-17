@@ -1,6 +1,6 @@
 import Plot from "react-plotly.js";
 import { RawData } from "@/utilities/invocations.ts";
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 interface DataDisplayProps {
@@ -9,14 +9,16 @@ interface DataDisplayProps {
 
 const DataDisplay = ({ data }: DataDisplayProps) => {
     const [trainingData, setTrainingData] = useState<RawData | null>(null);
-    // todo: make that better. just the solution
-    let xt = [];
-    let yt = [];
-    if (trainingData) {
-        for (const f of trainingData.output[0]) {
-            if (Math.abs(f - 1) <= 1e-3) {
-                xt.push(trainingData.input[0]);
-                yt.push(trainingData.input[1]);
+
+    let xt: number[] = [];
+    let yt: number[] = [];
+    console.log(trainingData);
+
+    if (trainingData && trainingData.output && trainingData.output[0]) {
+        for (let i = 0; i < trainingData.output[0].length; i++) {
+            if (Math.abs(trainingData.output[0][i] - 1) <= 1e-3) {
+                xt.push(trainingData.input[0][i]);
+                yt.push(trainingData.input[1][i]);
             }
         }
     }
@@ -30,6 +32,7 @@ const DataDisplay = ({ data }: DataDisplayProps) => {
             unlistenLossPromise.then((unlisten) => unlisten());
         };
     }, []);
+
     let x: number[] = [];
     let y: number[] = [];
     let z: number[] = [];
@@ -53,7 +56,7 @@ const DataDisplay = ({ data }: DataDisplayProps) => {
                             size: 8,
                             symbol: "circle",
                         },
-                        name: "Points",
+                        name: "Class 0",
                     },
                     {
                         z: z,

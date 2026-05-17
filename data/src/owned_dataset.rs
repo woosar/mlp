@@ -26,8 +26,8 @@ impl OwnedDataset {
 
     // todo: this is for testing..wip
     pub fn to_raw_data(self) -> RawData {
-        let input = de_interleave(Vec::from(self.data.input().clone()), self.input_dim);
-        let output = de_interleave(Vec::from(self.data.input().clone()), self.output_dim);
+        let input = de_interleave(Vec::from(self.data.input()), self.input_dim);
+        let output = de_interleave(Vec::from(self.data.output()), self.output_dim);
 
         RawData {
             input,

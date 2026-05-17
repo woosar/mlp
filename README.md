@@ -1,5 +1,9 @@
 I like to build stuff for myself. This is an implementation of an MLP with some performance considerations in mind. 
 
+Other Changes:
+* replace Vec with const generics such that no heap allogcation is necessary
+
+
 Todos:
 [ ] Replace naive gradient descent with a more sophisticated approach
 [ ] add data normalization
@@ -8,5 +12,6 @@ Todos:
 [ ] Documentation
 [ ] Make the net and training configurable
 [ ] Add some Striding selection for the dataset
-[ ] Emit loss
+[x] Emit loss
 [ ] provide a way to provide your own training data
+
