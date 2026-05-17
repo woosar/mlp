@@ -1,10 +1,10 @@
-use crate::assert_dimension_validity;
 use crate::owned_data::OwnedData;
+use crate::{RawData, assert_dimension_validity, de_interleave};
 use network::{Batch, BatchProvider};
 use rand::distr::{Distribution, Uniform};
 use std::fmt::{Debug, Formatter};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OwnedDataset {
     data: OwnedData,
     input_dim: usize,
@@ -22,6 +22,18 @@ impl OwnedDataset {
     }
     pub fn output(&self) -> &[f32] {
         &self.data.output()
+    }
+
+    // todo: this is for testing..wip
+    pub fn to_raw_data(self) -> RawData {
+        let input = de_interleave(Vec::from(self.data.input().clone()), self.input_dim);
+        let output = de_interleave(Vec::from(self.data.input().clone()), self.output_dim);
+
+        RawData {
+            input,
+            output,
+            prediction: Vec::new(),
+        }
     }
 
     pub fn input_dim(&self) -> usize {
@@ -149,7 +161,7 @@ impl OwnedDataset {
         ))
     }
 }
-
+#[derive(Clone)]
 pub enum BatchMode {
     Sequential,
     Random,
@@ -240,5 +252,3 @@ mod tests {
         assert_debug_snapshot!(lala)
     }
 }
-
-

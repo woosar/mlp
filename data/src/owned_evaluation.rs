@@ -14,7 +14,7 @@ pub struct OwnedEvaluation {
     input_dim: usize,
     output_dim: usize,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct RawData {
     pub input: Vec<Vec<f32>>,
     pub output: Vec<Vec<f32>>,

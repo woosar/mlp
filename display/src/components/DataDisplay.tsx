@@ -1,11 +1,35 @@
 import Plot from "react-plotly.js";
 import { RawData } from "@/utilities/invocations.ts";
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 interface DataDisplayProps {
     data: RawData | null;
 }
 
 const DataDisplay = ({ data }: DataDisplayProps) => {
+    const [trainingData, setTrainingData] = useState<RawData | null>(null);
+    // todo: make that better. just the solution
+    let xt = [];
+    let yt = [];
+    if (trainingData) {
+        for (const f of trainingData.output[0]) {
+            if (Math.abs(f - 1) <= 1e-3) {
+                xt.push(trainingData.input[0]);
+                yt.push(trainingData.input[1]);
+            }
+        }
+    }
+
+    useEffect(() => {
+        const unlistenLossPromise = listen<RawData>("training-data", (event) => {
+            setTrainingData(event.payload);
+        });
+
+        return () => {
+            unlistenLossPromise.then((unlisten) => unlisten());
+        };
+    }, []);
     let x: number[] = [];
     let y: number[] = [];
     let z: number[] = [];
@@ -19,6 +43,18 @@ const DataDisplay = ({ data }: DataDisplayProps) => {
             <Plot
                 className={"h-full"}
                 data={[
+                    {
+                        x: xt,
+                        y: yt,
+                        type: "scatter",
+                        mode: "markers",
+                        marker: {
+                            color: "red",
+                            size: 8,
+                            symbol: "circle",
+                        },
+                        name: "Points",
+                    },
                     {
                         z: z,
                         x: x,
