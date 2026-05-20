@@ -44,3 +44,32 @@ pub fn enable_fast_math() {
         );
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+pub fn enable_fast_math() {
+    unsafe {
+        let mut fpcr: u64;
+
+        // FZ (Flush-to-zero) is bit 24.
+        // This single bit handles both denormal inputs and denormal results.
+        const FZ: u64 = 1 << 24;
+
+        // Optionally, bit 25 (DN, Default NaN) is also frequently set in ARM
+        // fast-math setups to stop NaN payload propagation.
+        // const FZ_DN: u64 = (1 << 24) | (1 << 25);
+
+        std::arch::asm!(
+        "mrs {}, fpcr", // Read FPCR into the CPU register mapped to `fpcr`
+        out(reg) fpcr,
+        options(nostack, preserves_flags, nomem),
+        );
+
+        fpcr |= FZ;
+
+        std::arch::asm!(
+        "msr fpcr, {}", // Write the modified value back to the FPCR system register
+        in(reg) fpcr,
+        options(nostack, preserves_flags, nomem),
+        );
+    }
+}
