@@ -1,0 +1,523 @@
+\chapter{Rust Implementation}
+In this chapter the basic implementation of the MLP network in Rust is described. The net will have the following features/architecture:
+\begin{itemize}
+	\item Swap Buffer
+	\item Flattened Parameters
+	\item Adamprop Gradient Descent
+	\item Batched Training \enquote{Tensor-Math}	% Tensor is just a fancy way of saying..we efficiently calculate multi dimensional matrix products..derp
+\end{itemize}
+Tiling will not be addressed here as it is a true hardware optimization.
+\section{The swap buffer}
+\begin{lstlisting}[
+	language=Rust, 
+	caption={SwapBuffer Implementation}, 
+	label={lst:swap_buffer},
+	float=htbp
+	]
+#[derive(Debug)]
+pub struct SwapBuffer {
+	buffer_1: Vec<f32>,
+	buffer_2: Vec<f32>,
+}
+
+impl SwapBuffer {
+	pub fn new(capacity: usize) -> Self {
+		Self {
+			buffer_1: vec![0.0; capacity],
+			buffer_2: vec![0.0; capacity],
+		}
+	}
+	
+	pub fn get_pair(&mut self) -> (&mut Vec<f32>, &mut Vec<f32>) {
+		(&mut self.buffer_1, &mut self.buffer_2)
+	}
+	
+	pub fn swap(&mut self) {
+		std::mem::swap(&mut self.buffer_1, &mut self.buffer_2);
+	}
+}
+\end{lstlisting}
+This struct manages two pre-allocated buffers to facilitate layer transitions. In a forward pass, the activations from layer $l-1$ act as the input, while the results for layer $l$ are written into the second buffer. Because both buffers belong to the same struct, the Rust borrow-checker would normally prevent us from holding a mutable reference to both simultaneously. By using \rs{get_pair()}, we explicitly tell the compiler to 'split' the borrow, allowing us to read from one and write to the other in a single operation without violating safety or incurring the overhead of re-allocation.
+\newpage
+\section{The Neural Net Properties}
+\begin{lstlisting}[
+	gobble=0,
+	language=Rust, 
+	caption={NetProperties Implementation}, 
+	label={lst:net_properties},
+	float=htbp
+	]
+#[derive(Debug, Clone)]
+pub struct NetProperties {
+	layout: Vec<usize>,
+	transition_parameter_count: Vec<usize>,
+	transition_offsets: Vec<usize>,
+	number_of_parameters: usize,
+	capacity: usize,
+	max_layer: usize,
+}
+
+impl NetProperties {
+	pub fn new(layout: Vec<usize>) -> Self {
+		let capacity = layout
+		.iter()
+		.max()
+		.expect("next time, provide a valid layout")
+		+ 1; // +1 for the bias 
+		let transition_parameter_count: Vec<usize> = layout
+		.windows(2)
+		.map(|win| {
+			let (in_nodes, out_nodes) = (win[0], win[1]);
+			(in_nodes + 1) * out_nodes
+		})
+		.collect();
+		
+		let mut transition_offsets = cumulative_sum(&transition_parameter_count, 0);
+		let number_of_parameters = transition_offsets.pop().expect("this cannot fail");
+		let max_layer = transition_offsets.len();
+		Self {
+			layout,
+			transition_parameter_count,
+			transition_offsets,
+			number_of_parameters,
+			capacity,
+			max_layer,
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::data_structures::net_properties::NetProperties;
+	use insta::assert_debug_snapshot;
+	
+	#[test]
+	fn test_properties() {
+		let layout = vec![2, 3, 2];
+		let properties = NetProperties::new(layout);
+		assert_debug_snapshot!(properties)
+	}
+}
+
+\end{lstlisting}
+The properties contain all the indexing information that are needed for later calculations. They are encapsulated in a single struct because for calculating passes (forward and backward) the properties need to be passed to agents. The NetProperties struct encapsulates the indexing metadata we need for the network. By pre-computing these offsets and counts during initialization, we ensure that the \enquote{hot} execution paths—the actual forward and backward passes—don't waste cycles on redundant logic or extra allocations.\par
+Since the network layout is defined by the user at runtime, we have to use heap allocations here. We wrap the properties in an Arc so they can be shared across agents with a simple clone. Some might worry about the extra level of indirection through the pointer, but in the context of a neural net, that's rarely the real bottleneck. If a single pointer dereference is slowing you down, the computational intensity of your linear algebra is likely the least of your problems. We’re prioritizing a clean, thread-safe architecture here, as the performance gains from micro-optimizing this specific boundary are negligible compared to the math itself.
+
+\newpage\section{Activations}
+The snippet \ref{lst:activations} shows the implementation of the activation functions. Right now, only the Rectified Linear Unit (ReLU) is used. By bundling the activation and its derivative together, we make it much harder to mix them up during the actual pass implementation.In neural nets, we prefer activation functions that can be expressed via a differential equation. If we have an activation $a(x)$ and need its derivative $a'(x)$, it’s often faster to calculate the derivative in terms of the original function's output: $a' = f(a)$. Since the activations are already calculated during the forward pass, we can just reuse that result. This is trivial for ReLU, but for something like a Sigmoid (\ref{sec:sigmoid}), evaluating the derivative based on the stored activation value is a major shortcut.Another reason for this setup is how we handle "agents." When we pass these function definitions to a thread, the thread gets its own stack frame where the function lives. Since these are pure function pointers and not closures, they stay lightweight and thread-safe.
+\begin{lstlisting}[
+	language=Rust, 
+	caption={Activations}, 
+	label={lst:activations},
+	float=htbp
+	]
+#[derive(Clone, Copy, Debug)]
+pub struct Activations {
+	pub activation: fn(f32) -> f32,
+	// the derivative is in terms of the activation
+	pub derivative: fn(f32) -> f32,
+}
+
+pub enum Activation {
+	ReLu,
+}
+
+impl Activations {
+	pub fn new(activation: Activation) -> Self {
+		match activation {
+			Activation::ReLu => Self {
+				activation: relu_activation,
+				derivative: relu_derivative,
+			},
+		}
+	}
+}
+
+mod activation_functions {
+	pub fn relu_activation(input: f32) -> f32 {
+		if input > 0.0 { input } else { 0.0 }
+	}
+	pub fn relu_derivative(activation: f32) -> f32 {
+		if activation > 0.0 { 1.0 } else { 0.0 }
+	}
+}
+\end{lstlisting}
+\newpage\section{Signals}
+\begin{lstlisting}[
+		language=Rust, 
+	caption={Signals}, 
+	label={lst:signals},
+	float=htbp
+	]
+#[derive(Clone, Debug)]
+pub struct Signals {
+	appended_layout: Vec<usize>,
+	indices: Vec<usize>,
+	activations: Vec<f32>, // will be calculated during the forward pass
+}
+
+impl Signals {
+	pub fn new(layout: &[usize]) -> Self {
+		let mut appended_layout: Vec<usize> = layout.iter().map(|&l| l + 1).collect();
+		let last = appended_layout.len() - 1;
+		appended_layout[last] -= 1;
+		
+		let total: usize = appended_layout.iter().sum();
+		
+		let mut indices = cumulative_sum(&appended_layout, 0usize);
+		indices.pop();
+		
+		Self {
+			appended_layout,
+			indices,
+			activations: vec![0.0; total],
+		}
+	}
+	
+	fn layer_info(&self, layer: usize) -> (usize, usize) {
+		let node_count = self.appended_layout[layer];
+		let start_index = self.indices[layer];
+		(node_count, start_index)
+	}
+	
+	pub fn set_activations(&mut self, layer: usize, activations: &[f32]) {
+		let (node_count, start_index) = self.layer_info(layer);
+		self.activations[start_index..start_index + node_count]
+		.copy_from_slice(&activations[0..node_count])
+	}
+	
+	pub fn activations(&self, layer: usize) -> &[f32] {
+		let (node_count, start_index) = self.layer_info(layer);
+		&self.activations[start_index..start_index + node_count]
+	}
+}
+\end{lstlisting}
+The \rs{Signals} struct manages the dynamic state of the network during both the forward and backward passes. It tracks three primary components for every neuron: the Activations (outputs calculated during the forward pass), the Error Signals (the neuron's contribution to the total error), and the Gatekeepers.
+
+The \enquote{Gatekeepers} are the derivatives of the activation functions. They are calculated during the forward pass and act as valves during backpropagation, determining how much of the error signal is allowed to flow back through a specific path.
+
+To handle the bias terms efficiently, we use an \enquote{Appended Layout.} We treat every layer (except the last) as having an additional \enquote{Ghost Neuron} that acts as a constant bias. This expands the signal vectors, ensuring the total size matches the sum of this appended layout. By pre-calculating the \rs{indices} of these layers, we can navigate these flattened vectors with zero overhead, treating a massive block of memory as a structured series of layers.
+\newpage\section{The Batch}
+\begin{lstlisting}[
+	language=Rust, 
+	caption={The Batch}, 
+	label={lst:batch},
+	float=htbp
+	]
+#[derive(Debug)]
+pub struct Batch {
+	number_of_samples: usize,
+	input_nodes: usize,
+	output_nodes: usize,
+	split_index: usize,
+	data: Vec<f32>,
+	training: bool,
+}
+
+impl Batch {
+	pub fn new(
+	number_of_samples: usize,
+	input_nodes: usize,
+	output_nodes: usize,
+	data: &[f32],
+	training: bool,
+	) -> Self {
+		let split_index = number_of_samples * input_nodes;
+		Self {
+			number_of_samples,
+			input_nodes,
+			output_nodes,
+			split_index,
+			data: Vec::from(data),
+			training,
+		}
+	}
+	
+	pub fn number_of_samples(&self) -> usize {
+		self.number_of_samples
+	}
+	
+	pub fn input(&self, sample_number: usize) -> &[f32] {
+		let start_index = sample_number * self.input_nodes; // beware of off-by-one errors!
+		let end_index = (sample_number + 1) * self.input_nodes;
+		&self.data[start_index..end_index]
+	}
+	
+	pub fn output(&self, sample_number: usize) -> &[f32] {
+		if !self.training {
+			return &self.data[0..0];
+		}
+		let start_index = self.split_index + sample_number * self.output_nodes;
+		let end_index = self.split_index + (sample_number + 1) * self.output_nodes;
+		&self.data[start_index..end_index]
+	}
+}
+\end{lstlisting}
+Up until this point, we have haven't actually addressed how data enters the network. In line with our goal of minimizing overhead, we use a single contiguous block of memory to maximize \text{cache hits}. This isn't some academic exercise in premature optimization; it is a fundamental acknowledgment of the hardware's reality. \par The data is stored in \text{row-major} order by design. In a pure inference scenario, column-major storage makes indexing a needless hassle. More importantly, for our \enquote{Agent} model, row-major layout ensures that every input feature for a single sample sits contiguously in RAM. This gives us $O(1)$ lookup speeds that don't care about the scale of your indices. \par We should also be clear: we are not concerned with \enquote{big data}. That term is thrown around loosely by non-experts, but it specifically describes a memory-constraint problem where the experimental data is too large to fit in RAM at once, requiring streaming approximations of the \enquote{true process}. We aren't doing that. We assume the training data fits in memory—for now. \par While it might be computationally tempting to provide the \rs{Batch} as a mere view into a giant dataset to save on allocations, that approach isn't future-oriented. If our data requirements eventually grow, we need a system that can stream data in, allocate a batch that owns that data, process it, and drop it. By ensuring the \rs{Batch} \text{owns} its data now, we build an architecture that won't break when the problem size scales. \par The last point of contention is why we use a boolean flag instead of the more \enquote{idiomatic} Rust \rs{Option} for the output targets. Checking an \rs{Option} inside a hot loop is a tax on performance we don't need to pay. By using a boolean flag and returning a zero-length slice (\rs{&self.data[0..0]}) when training is disabled, we give the compiler a predictable path. It can likely unroll or optimize these branches away, ensuring inference remains as lean as possible without wasting cycles on branch mispredictions.
+\newpage\section{Neural Net Propagator}
+The \rs{NetPropagator} is the functional core of the network; while previous components handle orchestration, the propagator executes the actual logic. Because the implementation is complex, its methods are introduced sequentially.
+\begin{lstlisting}[
+	language=Rust, 
+	caption={Propagator}, 
+	label={lst:propagatordefinition},
+	float=htbp
+	]
+#[derive(Debug)]
+pub struct NetPropagator {
+	swap_buffer: SwapBuffer,
+	signals: Signals,
+	activation: Activations,
+	parameters: Arc<[f32]>,
+	properties: Arc<NetProperties>,
+}
+
+impl NetPropagator {
+	pub fn new(
+	activation: Activations,
+	parameters: Arc<[f32]>,
+	properties: Arc<NetProperties>,
+	) -> Self {
+		let swap_buffer = SwapBuffer::new(properties.capacity());
+		let signals = Signals::new(properties.layout());
+		Self {
+			swap_buffer,
+			signals,
+			activation,
+			parameters,
+			properties,
+		}
+	}
+}
+\end{lstlisting}
+The propagator encapsulates the specialized structs previously defined. The \rs{SwapBuffer}, \rs{Signals}, and \rs{Activations} are owned by the propagator; this is a requirement, as these fields hold the unique mutable state—activations and error signals—for a single pass.
+
+The \rs{NetProperties} represent the immutable topology of the network and are assigned a \rs{'static} lifetime, as they do not change during calculation. The parameters are managed via an \rs{Arc<[f32]>} smart pointer. As discussed, parameter updates are serialized and occur only after a batch is completed. This constraint is a mathematical necessity: to maintain consistency during parallel evaluation, every agent in a batch must work against the same static snapshot of the weight space. 
+\newpage\section{The Neural Net Orchestrator}
+Before the individual \enquote{payload} methods are discussed, the top-level orchestrator needs to be introduced.
+\begin{lstlisting}[
+	language=Rust, 
+	caption={Neural Net definition}, 
+	label={lst:net},
+	float=htbp
+	]
+pub struct NeuralNet {
+	activation: Activations,
+	properties: Arc<NetProperties>,
+	parameters: RwLock<Arc<[f32]>>,
+}
+
+impl NeuralNet {
+	pub fn new(layout: Vec<usize>, activation: Activations, parameters: Option<Vec<f32>>) -> Self {
+		let properties = NetProperties::new(layout);
+		let parameters = if let Some(lala) = parameters {
+			Arc::<[f32]>::from(lala)
+		} else {
+			Self::initialize_randomized_parameters(properties.number_of_parameters())
+		};
+		Self {
+			activation,
+			properties: Arc::new(properties),
+			parameters: RwLock::new(parameters),
+		}
+	}
+	
+	fn create_propagator(&self, current_parameters: Arc<[f32]>) -> NetPropagator {
+		NetPropagator::new(self.activation, current_parameters, self.properties.clone())
+	}
+}
+\end{lstlisting}
+This listing shows the definition, construction and one helper method of the orchestrator. It isThis listing defines the orchestrator's state. By wrapping the parameters in a RwLock<Arc<[f32]>>, we decouple the current \enquote{Snapshot} of the network from the active training process. self explanatory.
+\subsection{The backpropagation orchestration}
+\begin{lstlisting}[
+	language=Rust, 
+	caption={Backpropagation orchestration}, 
+	label={lst:backproporchestration},
+	float=htbp
+	]
+impl NeuralNet {
+	fn update_parameters(&self, gradient: Vec<f32>) {
+		let mut writer = self.parameters.write().unwrap();
+		let new_params_vec: Vec<f32> = writer
+		.iter()
+		.zip(gradient.iter())
+		.map(|(w, g)| w - (LEARNING_RATE * g)) // Simplest version
+		.collect();
+		*writer = Arc::from(new_params_vec);
+	}
+	
+	fn backprop(&self, batch: &Batch) {
+		let current_params = self.parameters.read().unwrap().clone();
+		let num_params = self.properties.number_of_parameters();
+		
+		let chunk_size = (batch.number_of_samples() / rayon::current_num_threads()).max(1);
+		
+		let total_gradient = (0..batch.number_of_samples())
+		.collect::<Vec<usize>>()
+		.par_chunks(chunk_size)
+		.map(|chunk| {
+			let mut propagator = self.create_propagator(current_params.clone());
+			let mut chunk_gradient = vec![0.0; num_params];
+			
+			for &i in chunk {
+				let input = batch.input(i);
+				let target = batch.output(i);
+				propagator.backprop(input, target, &mut chunk_gradient);
+			}
+			
+			chunk_gradient
+		})
+		.reduce(
+		|| vec![0.0; num_params],
+		|mut a, b| {
+			for (i, val) in b.iter().enumerate() {
+				a[i] += val;
+			}
+			a
+		},
+		);
+		
+		self.update_parameters(total_gradient);
+	}
+}
+
+\end{lstlisting}
+Snippet \ref{lst:backproporchestration} shows the high-level orchestration as well as the helper method for the actual batch parameter upgrade. Instead of just following the code, we need to explain the architectural decisions that prioritize hardware reality over mathematical purity. The first thing that is revealed is that this architecture does not follow the pure derivation in lockstep; these decisions are justified in \ref{asd} by the physical constraints of memory and compute.For now, it is enough to understand that a \text{Batch} is a subset of the training data and represents more than a single sample. In the limit, a batch size of $1$ is sample-wise learning, while a batch size of $N$ is full-dataset learning. 
+\par This is where we reach \enquote{Big Data} territory: the entire dataset often cannot fit in memory at once, necessitating a windowed, batch-wise approach. This is essentially a \text{Streaming Signal} problem where we estimate the true gradient from noisy, finite snapshots.The actual math is hidden in the \rs{Propagator}. At this point, it is sufficient to know that a propagator exists which can calculate the contribution to the gradient based on a single sample. The overall goal is to parallelly compute these contributions and then update the actual parameters once the batch is complete. Since the update must happen after the batch, this step acts as a \text{Synchronization Barrier}. The backpropagation orchestration consists of three distinct steps: the setup, the parallel computation of the gradient, and the parameter update.\par
+Since the update only happens at the end of the batch, we can acquire the \rs{read()} lock from the \rs{parameters} field and cheaply increase the reference count of the data. Because the \rs{Arc} smart pointer is used, we can safely pass this snapshot into multiple threads. Furthermore, since the update happens only during the joining phase, we do not need to worry about the complexities of \text{Interior Mutability}, which would have otherwise required wrapping the lock itself in an additional \rs{Arc}. Rayon operates such that there are no waiting threads for every individual iteration element. Instead, a number of \enquote{workers} are dispatched to take \rs{chunks} of the parallelizable data. While we could use a standard \rs{fold} method and let Rayon manage the distribution, there is a significant computational benefit to be gained by managing the chunks manually. \par In a naive \rs{fold} implementation, every iteration might technically allocate a new propagator. While modern allocators are fast, it is far more efficient to allocate exactly \text{one propagator per chunk}. This allows the same \rs{Propagator} to be reused sequentially for every sample within that chunk, keeping the \rs{signals} and \rs{swap_buffer} hot in the CPU cache. Since the \rs{backprop} method acts on a local mutable array, calling it sequentially in this interior loop is perfectly safe and highly performant.\par After this local accumulation, we use \rs{reduce} to merge these chunk-gradients into the final batch-gradient. If the sequentiality of the updates did not exist, the update pattern for the \rs{RwLock} would be significantly more complex. In a typical multi-writer scenario, you would acquire a read lock, compute a change, acquire a write lock, and then \enquote{peek} inside again to see if the value changed while you were calculating (the \text{Double-Checked Locking} pattern). However, since our training loop is mathematically constrained to be sequential—moving from one batch state to the next—we know for a fact that no other thread is competing to write. We can acquire the read lock once for the heavy parallel calculation and then acquire the write lock once for the update. Because we only change the \text{Pointer} (\rs{Arc}) within the lock, rather than mutating the underlying buffer, we achieve atomic swap behaviour due to sequentiality that doesn't even require the \rs{NeuralNet} struct itself to be mutable.
+\newpage\section{The Propagator Implementation}
+The \rs{NetPropagator} definition and its constructor are intentionally lean. While backpropagation is the ultimate goal of this implementation, the process begins with a specialized forward pass. While a standard inference pass is simpler, our version must be "instrumented" to support the chain rule.
+\subsection{Forward Pass}
+\begin{lstlisting}[
+	gobble=0,
+	language=Rust, 
+	caption={The Forward pass}, 
+	label={lst:forwardpass},
+	float=htbp
+	]
+impl NetPropagator {
+	pub fn forward_pass(&mut self, input: &[f32]) -> &[f32] {
+		let num_transitions = self.properties.transition_offsets().len();
+		
+		{
+			let (input_buffer, _) = self.swap_buffer.get_pair();
+			input_buffer[0..input.len()].copy_from_slice(input);
+		}
+		
+		for transition_idx in 0..num_transitions {
+			let transition_offset = self.properties.transition_offsets()[transition_idx];
+			let n_source_layer = self.properties.layout()[transition_idx];
+			let n_target_layer = self.properties.layout()[transition_idx + 1];
+			
+			let (input_buffer, output_buffer) = self.swap_buffer.get_pair();
+			
+			input_buffer[n_source_layer] = 1.0;
+			self.signals.set_activations(transition_idx, input_buffer);
+			
+			let is_last_layer = transition_idx == num_transitions - 1;
+			
+			for i in 0..n_target_layer {
+				let start_idx = transition_offset + i * (n_source_layer + 1);
+				
+				let mut acc: f32 = 0.0;
+				
+				for (j, &input_val) in input_buffer.iter().take(n_source_layer + 1).enumerate() {
+					acc += input_val * self.parameters[start_idx + j];
+				}
+				
+				output_buffer[i] = if is_last_layer {
+					acc // we assume identity activation in the final layer
+				} else {
+					(self.activation.activation)(acc)
+				};
+			}
+			
+			self.swap_buffer.swap();
+		}
+		
+		let num_layers = num_transitions;
+		let (final_output, _) = self.swap_buffer.get_pair();
+		self.signals.set_activations(num_layers, final_output);
+		
+		self.signals.activations(num_layers)
+	}
+}
+\end{lstlisting}
+The forward pass for backpropagation is structurally more complex than one used for pure inference. In a strictly predictive context, a \rs{SwapBuffer} is sufficient; a layer’s output becomes the next layer’s input, and the stale data is simply overwritten. This mechanism is highly efficient because it maintains temporal locality and eliminates the need for re-allocation within the hot loop. For deep networks processing high-frequency samples, avoiding heap churn is a non-negotiable performance requirement.\par
+However, backpropagation is a \enquote{history-dependent} algorithm. We need to preserve every intermediate activation to calculate the gradients later. This is the role of the \rs{Signals} struct. Instead of discarding \enquote{spent} inputs, we commit them to a contiguous memory block. Finally, the method returns the network's prediction, which serves as the starting point for the initial error signal.
+\subsubsection{The signature}
+From a black-box perspective, the forward pass remains a standard inference call: it accepts a slice of feature inputs and returns a slice of predictions. By returning a slice rather than an owned vector, we maintain our zero-copy guarantee.
+\subsubsection{The loop setup}
+Before entering the transition logic, we must seed the engine. We use \rs{get_pair} to acquire mutable references to our working buffers. Thanks to Rust’s lexical scoping, these borrows are dropped automatically at the end of the block, ensuring the \rs{SwapBuffer} is unlocked and ready for the main loop.
+\subsubsection{The outer loop}
+The overhead of our flattened data structure pays dividends here. By using pre-calculated offsets, we can navigate a single contiguous parameter block with surgical precision.\par
+The relationship between transitions and layers is a classic $N-1$ offset: the final layer does not initiate a new transition. We inject the bias by writing $1.0$ at the index representing the source layer's capacity. This is not an off-by-one error; it is a mechanical implementation of the \enquote{Ghost Neuron}. If a layer has two functional nodes, the third node is our constant bias, ensuring the subsequent dot product can be calculated in a single linear pass.\par
+For the output layer, we assume an identity activation. This is standard practice in both regression and classification (where raw logits are preferred for numerical stability in loss functions like Cross-Entropy). We have a choice: we could terminate the loop early to avoid the \rs{is_last_layer} check, but that would necessitate code duplication or a fragmented abstraction. Given that \rs{is_last_layer} is a simple boolean check on the stack, the compiler will likely unroll this loop or use branch prediction to make the cost effectively zero. We prioritize readability without sacrificing the performance of a manual implementation.
+\subsubsection{The inner loop}
+The inner loop performs the heavy lifting of linear algebra. Every weight is laid out linearly starting at the \rs{transition_offset}. Each target neuron accumulates contributions from every source neuron—including our bias—in a tight dot-product. If we are processing a hidden layer, we map the accumulator through the activation function; if we are at the output, we return the raw value.
+\subsubsection{The wrap-up}
+Because our logging happens at the start of each transition, the loop terminates before the final output state is recorded. We manually commit the final \rs{input_buffer} (which now holds the activated results of the last layer due to the swap) to the \rs{Signals} struct. This ensures the signals activations are complete and the propagator is ready for the backward pass.\par
+One final point to note is the absence of the functional iterator patterns typically favored in idiomatic Rust. While writing declarative data pipelines is often preferred, it makes this specific implementation significantly more difficult to manage. The borrow checker prevents closures from capturing and moving the buffers while the \rs{SwapBuffer} itself needs to be mutated for the \rs{swap()} mechanic. To avoid resorting to unsafe code or complex interior mutability, we choose to break with idiomatic patterns. This ensures memory safety and architectural clarity inside the most performance-sensitive part of the program.
+\subsection{Backpropagation}
+\begin{lstlisting}[
+	gobble=0,
+	language=Rust, 
+	caption={Backpropagation}, 
+	label={lst:backprop},
+	float=htbp
+	]
+impl NetPropagator {
+	
+	pub fn backprop(&mut self, input: &[f32], output: &[f32], local_gradient: &mut Vec<f32>) {
+		let new_output = self.forward_pass(input);		
+
+		let delta_l = output
+		.iter()
+		.zip(new_output)
+		.map(|(y, z)| z - y)
+		.collect::<Vec<_>>();
+		
+		{
+			let (input_buffer, _) = self.swap_buffer.get_pair();
+			input_buffer[0..delta_l.len()].copy_from_slice(&delta_l);
+		}
+		
+		for (transition_idx, transition_offset_idx) in self
+		.properties
+		.transition_offsets()
+		.iter()
+		.enumerate()
+		.rev()
+		{
+			// outer backprop loop
+			let (input_buffer, output_buffer) = self.swap_buffer.get_pair();
+			let source_activations = self.signals.activations(transition_idx);
+			let source_neuron_count = self.properties.layout()[transition_idx] + 1; // including ghost
+			let target_neuron_count = self.properties.layout()[transition_idx + 1];
+			
+			for i in 0..source_neuron_count {
+				let parameter_offset = transition_offset_idx + i;
+				let mut acc = 0.0;
+				for j in 0..target_neuron_count {
+					let index = parameter_offset + j * source_neuron_count;
+					acc += self.parameters[index] * input_buffer[j];
+					local_gradient[index] += input_buffer[j] * source_activations[i];
+				}
+				output_buffer[i] = acc * (self.activation.derivative)(source_activations[i])
+			}
+			self.swap_buffer.swap();
+		}
+	}
+}
+\end{lstlisting}
+The backpropagation algorithm is the standard for training neural networks, acting as a structural exploitation of the model to calculate gradients efficiently. This implementation handles the backpropagation for a single sample, providing the "plumbing" for larger batch operations.
+
+\subsubsection{The Setup}
+To initialize the process, we require the error signal from the final layer. This necessitates a forward pass to obtain the current network state. Following \eqref{eq:first-signal}, the first error signal is defined by the network error scaled by the output activation derivative. Given the common assumption of an identity activation for the output layer, \rs{delta_l} simplifies to the raw error array. Utilizing the same \rs{swap_buffer} mechanic from the forward pass, we prime the input buffer with this initial signal.
+
+\subsubsection{The Transition Loop}
+We then iterate backward through the network transitions. Rust’s \rs{rev()} method, applied after \rs{enumerate()}, allows us to traverse the architecture in reverse without manual index inversion. Within the loop, we re-obtain the buffer pair from the \rs{swap_buffer}. We retrieve the source activations for the current transition and define the neuron counts—including the "ghost" bias neuron—as local variables. These \rs{usize} variables improve readability and are optimized away by the compiler, incurring no runtime allocation penalty.
+
+\subsubsection{Calculating the Gradient Contribution}
+The core logic consists of nested loops: the outer iterates over source neurons, while the inner traverses target neurons. We calculate the \rs{parameter_offset} in the outer loop to minimize additions. Inside the inner loop, the \rs{index} variable represents the "jumping parameter access," which effectively performs the implicit transpose of the weight matrix required during backpropagation. While we assume small networks where cache tiling is not a priority, this flattened memory access remains highly efficient.
+
+The loss gradient is calculated according to \eqref{eq:loss-gradient-vectorized} and accumulated into the mutable \rs{local_gradient} vector. At the conclusion of the outer loop, the next layer's error signal is computed according to \eqref{eq:error_signal_update}, incorporating the activation derivative (the "gatekeeper") of the source nodes. Finally, a buffer swap prepares the state for the next backward transition.

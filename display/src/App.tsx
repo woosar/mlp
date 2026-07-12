@@ -1,10 +1,8 @@
 import "./App.css";
-import Divider from "@/components/Divider.tsx";
+import Dashboard from "@/components/Dashboard.tsx";
 
-const App = ()=>{
-    return <Divider/>;
-}
-
-
+const App = () => {
+    return <Dashboard />;
+};
 
 export default App;
